@@ -190,6 +190,11 @@ button{ display:inline-flex; align-items:center; justify-content:center; gap:6px
 @media (prefers-reduced-motion: reduce){ .btn-tool.recording{ animation:none; } }
 
 .btn-tool svg{ width:13px; height:13px; }
+
+.live-badge{ position:absolute; bottom:12px; right:12px; z-index:10; display:none; align-items:center; gap:7px; background:rgba(11,9,6,.85); border:1px solid var(--red); color:var(--red); padding:6px 11px; border-radius:var(--radius); font-family:'JetBrains Mono', monospace; font-size:11px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; backdrop-filter:blur(4px); }
+.live-badge.show{ display:flex; }
+.dot-live{ width:8px; height:8px; border-radius:50%; background:var(--red); box-shadow:0 0 6px 1px rgba(255,77,77,.5); animation:blink 1.4s infinite; flex-shrink:0; }
+@media (prefers-reduced-motion: reduce){ .dot-live{ animation:none; } }
 </style>
 </head>
 <body>
@@ -396,6 +401,7 @@ let activeCameras = {};
 let streams = {};
 let rotations = {};
 let zooms = {};
+let videoDims = {};
 let recorders = {};
 let recordedChunks = {};
 
@@ -421,14 +427,34 @@ function initMonitorMode() {
         call.on('stream', (remoteStream) => {
             const videoElement = document.getElementById(`video-${call.peer}`);
             const titleBadge = document.getElementById(`title-${call.peer}`);
+            const liveBadge = document.getElementById(`live-${call.peer}`);
 
             streams[call.peer] = remoteStream;
 
             if (videoElement) {
                 videoElement.srcObject = remoteStream;
                 if (titleBadge) titleBadge.className = "cam-title live";
+                if (liveBadge) liveBadge.classList.add("show");
+
+                videoElement.addEventListener('loadedmetadata', () => {
+                    videoDims[call.peer] = { w: videoElement.videoWidth, h: videoElement.videoHeight };
+                    updateTransform(call.peer);
+                });
+
+                videoElement.addEventListener('ended', () => {
+                    if (liveBadge) liveBadge.classList.remove("show");
+                    if (titleBadge) titleBadge.className = "cam-title error";
+                });
+
                 setTimeout(() => updateTransform(call.peer), 500);
             }
+        });
+
+        call.on('close', () => {
+            const titleBadge = document.getElementById(`title-${call.peer}`);
+            const liveBadge = document.getElementById(`live-${call.peer}`);
+            if (liveBadge) liveBadge.classList.remove("show");
+            if (titleBadge) titleBadge.className = "cam-title error";
         });
     });
 }
@@ -443,6 +469,13 @@ window.updateTransform = function (id) {
     wrapper.classList.remove('rotated-box');
     if (rot === 90 || rot === 270) {
         wrapper.classList.add('rotated-box');
+    }
+
+    const dims = videoDims[id];
+    if (dims && dims.w && dims.h) {
+        wrapper.style.aspectRatio = (rot === 90 || rot === 270)
+            ? `${dims.h} / ${dims.w}`
+            : `${dims.w} / ${dims.h}`;
     }
 
     requestAnimationFrame(() => {
@@ -546,6 +579,7 @@ btnAddCam.addEventListener('click', () => {
         <div class="cam-title" id="title-${fullCamID}">CAM: ${camName.toUpperCase()}</div>
         <div class="timestamp" id="time-${fullCamID}">00/00/0000 00:00:00</div>
         <video id="video-${fullCamID}" autoplay playsinline controls></video>
+        <div class="live-badge" id="live-${fullCamID}"><span class="dot-live"></span>Live</div>
         <div class="cam-toolbar">
             <button class="btn-tool" onclick="zoomCam('${fullCamID}', -0.25)" title="Zoom Out">${iconZoomOut}</button>
             <button class="btn-tool" onclick="zoomCam('${fullCamID}', 0.25)" title="Zoom In">${iconZoomIn}</button>
