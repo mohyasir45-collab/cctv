@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>CCTV App</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+:root{
+  --bg:#0b0906;
+  --panel:#15110c;
+  --panel-alt:#1c160f;
+  --border:#332920;
+  --border-bright:#5f4a30;
+  --text:#f3ead9;
+  --text-dim:#9c8f7c;
+  --text-faint:#5c5344;
+  --amber:#ffb238;
+  --amber-dim:#b8813a;
+  --amber-glow:rgba(255,178,56,.35);
+  --green:#6fcf7c;
+  --red:#ff4d4d;
+  --radius:3px;
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+
+body{
+  background-color:var(--bg);
+  background-image:repeating-linear-gradient(0deg, rgba(255,178,56,.025) 0px, rgba(255,178,56,.025) 1px, transparent 1px, transparent 3px);
+  color:var(--text);
+  font-family:'Inter', sans-serif;
+  min-height:100dvh;
+  overflow-x:hidden;
+}
+
+svg{ width:20px; height:20px; }
+
+*:focus-visible{ outline:2px solid var(--amber); outline-offset:2px; }
+
+.mono{ font-family:'JetBrains Mono', monospace; }
+
+.led{ width:6px; height:6px; border-radius:50%; background:var(--amber); box-shadow:0 0 6px 1px var(--amber-glow); flex-shrink:0; }
+.led.green{ background:var(--green); box-shadow:0 0 6px 1px rgba(111,207,124,.45); }
+.led.red{ background:var(--red); box-shadow:0 0 6px 1px rgba(255,77,77,.45); }
+
+.eyebrow{ display:flex; align-items:center; gap:8px; font-family:'JetBrains Mono', monospace; font-size:11px; letter-spacing:.15em; text-transform:uppercase; color:var(--text-dim); }
+
+/* ============ BRACKET FRAME (signature element) ============ */
+.bracket{ position:relative; }
+.bracket::before{
+  content:"";
+  position:absolute; inset:-1px;
+  pointer-events:none;
+  z-index:5;
+  background:
+    linear-gradient(to right, var(--amber) 2px, transparent 2px) 0 0/14px 14px no-repeat,
+    linear-gradient(to right, var(--amber) 2px, transparent 2px) 0 100%/14px 14px no-repeat,
+    linear-gradient(to left, var(--amber) 2px, transparent 2px) 100% 0/14px 14px no-repeat,
+    linear-gradient(to left, var(--amber) 2px, transparent 2px) 100% 100%/14px 14px no-repeat,
+    linear-gradient(to bottom, var(--amber) 2px, transparent 2px) 0 0/14px 14px no-repeat,
+    linear-gradient(to bottom, var(--amber) 2px, transparent 2px) 100% 0/14px 14px no-repeat,
+    linear-gradient(to top, var(--amber) 2px, transparent 2px) 0 100%/14px 14px no-repeat,
+    linear-gradient(to top, var(--amber) 2px, transparent 2px) 100% 100%/14px 14px no-repeat;
+  opacity:.5;
+  transition:opacity .25s ease;
+}
+.bracket:hover::before, .bracket:focus-within::before{ opacity:1; }
+
+@media (prefers-reduced-motion: reduce){
+  .bracket::before{ transition:none; }
+}
+
+/* ============ SHARED CONTROLS ============ */
+input[type="text"]{
+  padding:14px 16px; font-size:15px; border-radius:var(--radius);
+  border:1px solid var(--border); background:var(--panel-alt); color:var(--text);
+  outline:none; font-family:'JetBrains Mono', monospace; letter-spacing:.02em;
+}
+input[type="text"]::placeholder{ color:var(--text-faint); }
+input[type="text"]:focus{ border-color:var(--amber); }
+
+.btn{
+  font-family:'JetBrains Mono', monospace; font-weight:700; font-size:12.5px;
+  letter-spacing:.1em; text-transform:uppercase; cursor:pointer;
+  border-radius:var(--radius); display:inline-flex; align-items:center; justify-content:center; gap:8px;
+  transition:.15s ease; border:1px solid transparent;
+}
+.btn-solid{ background:var(--amber); color:#1a1206; padding:14px 26px; }
+.btn-solid:hover{ background:#ffc35c; }
+.btn-ghost{ background:transparent; color:var(--text); border-color:var(--border-bright); padding:11px 18px; }
+.btn-ghost:hover{ border-color:var(--amber); color:var(--amber); }
+.btn-link{ background:transparent; color:var(--text-dim); border:none; padding:8px 10px; }
+.btn-link:hover{ color:var(--amber); }
+
+/* ============ MODE SELECT SCREEN ============ */
+#modeSelectScreen{ position:fixed; inset:0; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:24px; text-align:center; gap:0; overflow:hidden; }
+
+.hero-sweep{ position:absolute; top:0; left:0; right:0; height:2px; background:linear-gradient(90deg, transparent, var(--amber), transparent); opacity:.9; animation:sweep 2.2s ease-out 1; }
+@keyframes sweep{ 0%{ transform:translateY(0); opacity:0; } 10%{ opacity:1; } 100%{ transform:translateY(100vh); opacity:0; } }
+@media (prefers-reduced-motion: reduce){ .hero-sweep{ display:none; } }
+
+#modeSelectScreen .eyebrow{ margin-bottom:18px; }
+#modeSelectScreen h1{
+  font-family:'Space Mono', monospace; font-weight:700; text-transform:uppercase;
+  font-size:clamp(1.6rem, 4vw, 2.4rem); letter-spacing:.03em; margin-bottom:10px;
+}
+#modeSelectScreen h1 .accent{ color:var(--amber); }
+#modeSelectScreen .sub{ color:var(--text-dim); font-size:14px; margin-bottom:44px; }
+
+.mode-options{ display:flex; gap:22px; flex-wrap:wrap; justify-content:center; }
+.mode-card{
+  background:var(--panel); border:1px solid var(--border); border-radius:var(--radius);
+  padding:34px 28px; width:240px; cursor:pointer; transition:.2s ease;
+  display:flex; flex-direction:column; align-items:flex-start; gap:14px; text-align:left;
+}
+.mode-card:hover{ background:var(--panel-alt); transform:translateY(-2px); box-shadow:0 12px 30px -12px rgba(0,0,0,.6); }
+.mode-card .icon-box{ width:46px; height:46px; border:1px solid var(--border-bright); border-radius:var(--radius); display:flex; align-items:center; justify-content:center; color:var(--amber); }
+.mode-card h3{ font-family:'Space Mono', monospace; font-size:1rem; letter-spacing:.08em; text-transform:uppercase; }
+.mode-card p{ font-size:13px; color:var(--text-dim); line-height:1.55; }
+.mode-card .go{ font-family:'JetBrains Mono', monospace; font-size:12px; color:var(--amber-dim); display:flex; align-items:center; gap:6px; transition:.2s ease; }
+.mode-card:hover .go{ color:var(--amber); gap:10px; }
+
+.status-strip{ margin-top:56px; display:flex; gap:28px; flex-wrap:wrap; justify-content:center; max-width:640px; }
+.status-strip .item{ display:flex; align-items:center; gap:8px; font-family:'JetBrains Mono', monospace; font-size:10.5px; letter-spacing:.05em; color:var(--text-faint); text-transform:uppercase; max-width:180px; text-align:left; }
+
+/* ============ SETUP SCREEN (KAMERA) ============ */
+#setupScreen{ position:fixed; inset:0; background:var(--bg); display:none; flex-direction:column; justify-content:center; align-items:center; z-index:100; padding:20px; text-align:center; }
+.setup-card{ background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:44px 40px; width:100%; max-width:360px; display:flex; flex-direction:column; align-items:center; }
+.setup-card .icon-box{ width:46px; height:46px; border:1px solid var(--border-bright); border-radius:var(--radius); display:flex; align-items:center; justify-content:center; color:var(--amber); margin-bottom:18px; }
+.setup-card h2{ font-family:'Space Mono', monospace; font-weight:700; text-transform:uppercase; letter-spacing:.05em; font-size:1.1rem; margin-bottom:8px; }
+.setup-card p{ margin-bottom:22px; color:var(--text-dim); font-size:13px; }
+.setup-card input[type="text"]{ width:100%; margin-bottom:18px; text-align:center; }
+.setup-card .btn-solid{ width:100%; }
+
+.btn-back{ position:absolute; top:22px; left:22px; z-index:200; }
+
+.cam-container{ position:fixed; inset:0; width:100%; height:100%; display:none; flex-direction:column; justify-content:center; background:#000; }
+video.local-video{ width:100%; height:100%; object-fit:contain; background:#000; }
+
+.overlay{ position:absolute; top:0; left:0; right:0; padding:22px; display:flex; justify-content:space-between; align-items:center; background:linear-gradient(to bottom, rgba(11,9,6,.92), transparent); z-index:10; }
+.rec-indicator{ display:flex; align-items:center; gap:8px; color:var(--red); font-family:'Space Mono', monospace; font-size:1rem; letter-spacing:.15em; text-transform:uppercase; }
+.dot{ width:11px; height:11px; background-color:var(--red); border-radius:50%; box-shadow:0 0 8px 1px rgba(255,77,77,.5); animation:blink 1.5s infinite; }
+@keyframes blink{ 0%{opacity:1;} 50%{opacity:.25;} 100%{opacity:1;} }
+@media (prefers-reduced-motion: reduce){ .dot{ animation:none; } }
+
+.status-badge{ background:var(--panel); border:1px solid var(--border); padding:8px 14px; border-radius:var(--radius); font-family:'JetBrains Mono', monospace; font-size:11.5px; letter-spacing:.05em; text-transform:uppercase; transition:.3s; }
+.status-badge.active{ background:rgba(111,207,124,.08); border-color:var(--green); color:var(--green); }
+.status-badge.watching{ background:rgba(255,178,56,.08); border-color:var(--amber); color:var(--amber); }
+
+.bottom-controls{ position:absolute; bottom:40px; left:0; right:0; display:flex; justify-content:center; z-index:10; }
+.btn-switch{ background:rgba(11,9,6,.85); border:1px solid var(--border-bright); color:var(--text); padding:13px 24px; border-radius:var(--radius); font-family:'JetBrains Mono', monospace; font-size:12.5px; letter-spacing:.08em; text-transform:uppercase; cursor:pointer; display:flex; align-items:center; gap:9px; backdrop-filter:blur(4px); transition:.15s ease; }
+.btn-switch:hover{ border-color:var(--amber); color:var(--amber); }
+
+/* ============ MONITOR PANEL ============ */
+#monitorScreen{ display:none; flex-direction:column; align-items:center; min-height:100vh; padding:24px; }
+.header{ width:100%; max-width:1200px; padding:22px 0; border-bottom:1px solid var(--border); margin-bottom:24px; display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:16px; }
+.header h2{ font-family:'Space Mono', monospace; font-weight:700; color:var(--text); font-size:1.15rem; letter-spacing:.05em; text-transform:uppercase; display:flex; align-items:center; gap:12px; }
+.header h2 .accent{ color:var(--amber); }
+.header h2 svg{ width:22px; height:22px; color:var(--amber); }
+
+.controls{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; background:var(--panel); padding:14px; border-radius:var(--radius); border:1px solid var(--border); }
+.controls input[type="text"]{ padding:11px 14px; font-size:13px; width:auto; margin-bottom:0; text-align:left; }
+
+button{ display:inline-flex; align-items:center; justify-content:center; gap:6px; }
+
+.video-grid{ width:100%; max-width:1200px; display:grid; gap:22px; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); align-items:start; }
+
+.video-wrapper{ position:relative; width:100%; background:#000; border-radius:var(--radius); overflow:hidden; border:1px solid var(--border); transition:all .3s ease; }
+.video-wrapper video{ position:absolute; top:0; left:0; width:100%; height:100%; object-fit:contain; transition:transform .3s ease; }
+
+.grid-landscape .video-wrapper{ aspect-ratio:16/9; }
+.grid-portrait .video-wrapper{ aspect-ratio:9/16; max-height:700px; }
+.grid-landscape .video-wrapper.rotated-box{ aspect-ratio:9/16; max-height:700px; }
+.grid-portrait .video-wrapper.rotated-box{ aspect-ratio:16/9; max-height:none; }
+
+.cam-title{ position:absolute; top:12px; left:12px; background:rgba(11,9,6,.85); padding:5px 10px; border-radius:var(--radius); font-family:'JetBrains Mono', monospace; font-size:11.5px; font-weight:700; letter-spacing:.04em; color:var(--text); z-index:10; border-left:3px solid var(--amber); backdrop-filter:blur(4px); }
+.cam-title.live{ border-left-color:var(--green); }
+.cam-title.error{ border-left-color:var(--red); }
+
+.timestamp{ position:absolute; top:12px; right:12px; background:rgba(11,9,6,.85); padding:5px 10px; border-radius:var(--radius); font-family:'JetBrains Mono', monospace; font-size:11.5px; color:var(--text-dim); z-index:10; backdrop-filter:blur(4px); border:1px solid var(--border); letter-spacing:.05em; }
+
+.cam-toolbar{ position:absolute; bottom:12px; left:12px; z-index:10; display:flex; gap:6px; }
+.btn-tool{ background:rgba(11,9,6,.88); color:var(--text-dim); border:1px solid var(--border-bright); padding:7px 11px; border-radius:var(--radius); font-family:'JetBrains Mono', monospace; font-size:11px; letter-spacing:.04em; text-transform:uppercase; cursor:pointer; transition:.2s; backdrop-filter:blur(4px); }
+.btn-tool:hover{ border-color:var(--amber); color:var(--amber); }
+.btn-tool.recording{ background:rgba(255,77,77,.12); color:#ffb0b0; border-color:var(--red); animation:blink2 1.5s infinite; }
+@keyframes blink2{ 0%{opacity:1;} 50%{opacity:.55;} 100%{opacity:1;} }
+@media (prefers-reduced-motion: reduce){ .btn-tool.recording{ animation:none; } }
+
+.btn-tool svg{ width:13px; height:13px; }
+</style>
+</head>
+<body>
+
+<!-- ============ MODE SELECT SCREEN ============ -->
+<div id="modeSelectScreen">
+    <div class="hero-sweep"></div>
+    <div class="eyebrow"><span class="led"></span>CCTV OS &middot; STANDBY</div>
+    <h1>Sistem <span class="accent">Pengawasan</span></h1>
+    <p class="sub">Pilih peran perangkat ini untuk memulai</p>
+    <div class="mode-options">
+        <div class="mode-card bracket" id="cardKamera">
+            <div class="icon-box">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+            </div>
+            <h3>Kamera</h3>
+            <p>Jadikan perangkat ini sumber video. Kirim gambar langsung dari kamera HP atau laptop.</p>
+            <span class="go">Mulai kirim feed →</span>
+        </div>
+        <div class="mode-card bracket" id="cardMonitor">
+            <div class="icon-box">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>
+            </div>
+            <h3>Monitor</h3>
+            <p>Pantau semua kamera aktif. Tambah, putar, perbesar, dan rekam dari satu layar.</p>
+            <span class="go">Buka panel →</span>
+        </div>
+    </div>
+    <div class="status-strip">
+        <div class="item"><span class="led green"></span>P2P langsung antar perangkat, tanpa server tengah</div>
+        <div class="item"><span class="led green"></span>Rekaman tersimpan di perangkat Anda saja</div>
+        <div class="item"><span class="led green"></span>Koneksi dienkripsi otomatis oleh WebRTC</div>
+    </div>
+</div>
+
+<!-- ============ SETUP SCREEN (KAMERA) ============ -->
+<div id="setupScreen">
+    <button class="btn btn-link btn-back" id="btnBackFromSetup">&larr; KEMBALI</button>
+    <div class="setup-card bracket">
+        <div class="icon-box">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+        </div>
+        <h2>Setup Kamera</h2>
+        <p>Beri nama lokasi kamera ini</p>
+        <input type="text" id="inputCamNameKamera" placeholder="misal: dapur">
+        <button class="btn btn-solid" id="btnStart">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            Aktifkan Kamera
+        </button>
+    </div>
+</div>
+
+<div class="cam-container" id="camContainer">
+    <div class="overlay">
+        <div class="rec-indicator"><div class="dot"></div> <span id="namaCamLabel">REC</span></div>
+        <div class="status-badge" id="statusInfo">Memuat Kamera...</div>
+    </div>
+    <video class="local-video" id="kameraLokal" autoplay playsinline muted></video>
+    <div class="bottom-controls">
+        <button id="btnSwitchCam" class="btn-switch">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 109-9 9.75 9.75 0 00-6.74 2.74L3 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 10-9 9 9.75 9.75 0 006.74-2.74L21 16"/></svg>
+            Ganti Kamera
+        </button>
+    </div>
+</div>
+
+<!-- ============ MONITOR PANEL ============ -->
+<div id="monitorScreen">
+    <div class="header">
+        <h2>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>
+            VMS <span class="accent">&middot; Panel Pemantau</span>
+        </h2>
+        <div class="controls bracket">
+            <button class="btn btn-link" id="btnBackFromMonitor">&larr; KEMBALI</button>
+            <input type="text" id="inputCamNameMonitor" placeholder="ID kamera baru...">
+            <button class="btn btn-solid" id="btnAddCam" style="padding:11px 18px;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                Tambah
+            </button>
+            <button class="btn btn-ghost" id="btnLayout">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>
+                Ubah Layout
+            </button>
+        </div>
+    </div>
+
+    <div class="video-grid grid-landscape" id="videoGrid"></div>
+</div>
+
+<script>
+/* ============ MODE SELECT LOGIC ============ */
+const modeSelectScreen = document.getElementById('modeSelectScreen');
+const setupScreen = document.getElementById('setupScreen');
+const camContainer = document.getElementById('camContainer');
+const monitorScreen = document.getElementById('monitorScreen');
+
+function showOnly(el) {
+    [modeSelectScreen, setupScreen, camContainer, monitorScreen].forEach(e => {
+        e.style.display = 'none';
+    });
+    if (el === modeSelectScreen) el.style.display = 'flex';
+    else if (el === setupScreen) el.style.display = 'flex';
+    else if (el === camContainer) el.style.display = 'flex';
+    else if (el === monitorScreen) el.style.display = 'flex';
+}
+
+document.getElementById('cardKamera').addEventListener('click', () => {
+    showOnly(setupScreen);
+});
+document.getElementById('cardMonitor').addEventListener('click', () => {
+    showOnly(monitorScreen);
+    if (!monitorInitialized) initMonitorMode();
+});
+document.getElementById('btnBackFromSetup').addEventListener('click', () => {
+    showOnly(modeSelectScreen);
+});
+document.getElementById('btnBackFromMonitor').addEventListener('click', () => {
+    showOnly(modeSelectScreen);
+});
+
+/* ============ KAMERA MODE LOGIC ============ */
+const inputCamNameKamera = document.getElementById('inputCamNameKamera');
+const btnStart = document.getElementById('btnStart');
+const videoElement = document.getElementById('kameraLokal');
+const statusInfo = document.getElementById('statusInfo');
+const btnSwitchCam = document.getElementById('btnSwitchCam');
+const namaCamLabel = document.getElementById('namaCamLabel');
+
+let camPeer = null;
+let currentFacingMode = "environment";
+let localStream = null;
+let activeMediaCall = null;
+
+btnStart.addEventListener('click', () => {
+    let camName = inputCamNameKamera.value.trim().toLowerCase().replace(/\s+/g, '-');
+    if (!camName) { alert("Nama kamera tidak boleh kosong!"); return; }
+
+    const ID_KAMERA = "cctv-pribadi-" + camName;
+    showOnly(camContainer);
+    namaCamLabel.innerText = "REC: " + camName.toUpperCase();
+
+    camPeer = new Peer(ID_KAMERA, { config: { 'iceServers': [{ urls: 'stun:stun.l.google.com:19302' }] } });
+    mulaiKamera();
+    setupPeerListeners();
+});
+
+function mulaiKamera() {
+    if (localStream) localStream.getTracks().forEach(track => track.stop());
+
+    const constraints = {
+        video: { facingMode: currentFacingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: { echoCancellation: true, noiseSuppression: true }
+    };
+
+    navigator.mediaDevices.getUserMedia(constraints)
+        .then((stream) => {
+            localStream = stream;
+            videoElement.srcObject = stream;
+            if (activeMediaCall && activeMediaCall.peerConnection) {
+                const videoTrack = stream.getVideoTracks()[0];
+                const sender = activeMediaCall.peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
+                if (sender) sender.replaceTrack(videoTrack);
+            }
+        })
+        .catch((err) => { statusInfo.innerText = "Gagal Akses"; statusInfo.style.color = "#ef4444"; });
+}
+
+btnSwitchCam.addEventListener('click', () => {
+    currentFacingMode = (currentFacingMode === "environment") ? "user" : "environment";
+    mulaiKamera();
+});
+
+function setupPeerListeners() {
+    camPeer.on('open', () => {
+        statusInfo.innerText = "Online & Siap";
+        statusInfo.className = "status-badge active";
+    });
+    camPeer.on('connection', (conn) => {
+        statusInfo.innerText = "Menyiapkan Video...";
+        conn.on('open', () => {
+            statusInfo.innerText = "Sedang Dipantau";
+            statusInfo.className = "status-badge watching";
+            activeMediaCall = camPeer.call(conn.peer, localStream);
+        });
+        conn.on('close', () => {
+            statusInfo.innerText = "Online & Siap";
+            statusInfo.className = "status-badge active";
+            activeMediaCall = null;
+        });
+    });
+}
+
+/* ============ MONITOR MODE LOGIC ============ */
+let monitorInitialized = false;
+let monitorPeer = null;
+const videoGrid = document.getElementById('videoGrid');
+const inputCamNameMonitor = document.getElementById('inputCamNameMonitor');
+const btnAddCam = document.getElementById('btnAddCam');
+const btnLayout = document.getElementById('btnLayout');
+
+let isLandscape = true;
+let activeCameras = {};
+let streams = {};
+let rotations = {};
+let zooms = {};
+let recorders = {};
+let recordedChunks = {};
+
+function initMonitorMode() {
+    monitorInitialized = true;
+    monitorPeer = new Peer({ config: { 'iceServers': [{ urls: 'stun:stun.l.google.com:19302' }] } });
+
+    setInterval(() => {
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString('id-ID', { hour12: false });
+        const dateStr = now.toLocaleDateString('id-ID', { year: 'numeric', month: '2-digit', day: '2-digit' });
+        const formatted = `${dateStr} ${timeStr}`;
+
+        Object.keys(activeCameras).forEach(id => {
+            const el = document.getElementById(`time-${id}`);
+            if (el) el.innerText = formatted;
+        });
+    }, 1000);
+
+    monitorPeer.on('call', (call) => {
+        call.answer();
+
+        call.on('stream', (remoteStream) => {
+            const videoElement = document.getElementById(`video-${call.peer}`);
+            const titleBadge = document.getElementById(`title-${call.peer}`);
+
+            streams[call.peer] = remoteStream;
+
+            if (videoElement) {
+                videoElement.srcObject = remoteStream;
+                if (titleBadge) titleBadge.className = "cam-title live";
+                setTimeout(() => updateTransform(call.peer), 500);
+            }
+        });
+    });
+}
+
+window.updateTransform = function (id) {
+    const video = document.getElementById(`video-${id}`);
+    if (!video) return;
+    const wrapper = video.parentElement;
+    const rot = rotations[id] || 0;
+    const z = zooms[id] || 1;
+
+    wrapper.classList.remove('rotated-box');
+    if (rot === 90 || rot === 270) {
+        wrapper.classList.add('rotated-box');
+    }
+
+    requestAnimationFrame(() => {
+        const w = wrapper.clientWidth;
+        const h = wrapper.clientHeight;
+
+        if (rot === 90 || rot === 270) {
+            video.style.width = `${h}px`;
+            video.style.height = `${w}px`;
+            const translateX = (w - h) / 2;
+            const translateY = (h - w) / 2;
+            video.style.transform = `translate(${translateX}px, ${translateY}px) rotate(${rot}deg) scale(${z})`;
+        } else {
+            video.style.width = `100%`;
+            video.style.height = `100%`;
+            video.style.transform = `rotate(${rot}deg) scale(${z})`;
+        }
+    });
+};
+
+window.addEventListener('resize', () => {
+    Object.keys(activeCameras).forEach(id => updateTransform(id));
+});
+
+btnLayout.addEventListener('click', () => {
+    isLandscape = !isLandscape;
+    videoGrid.className = isLandscape ? "video-grid grid-landscape" : "video-grid grid-portrait";
+    setTimeout(() => { Object.keys(activeCameras).forEach(id => updateTransform(id)); }, 50);
+});
+
+window.rotateCam = function (id) {
+    if (rotations[id] === undefined) rotations[id] = 0;
+    rotations[id] += 90;
+    if (rotations[id] >= 360) rotations[id] = 0;
+    updateTransform(id);
+};
+
+window.zoomCam = function (id, amount) {
+    if (zooms[id] === undefined) zooms[id] = 1;
+    zooms[id] += amount;
+
+    if (zooms[id] < 1) zooms[id] = 1;
+    if (zooms[id] > 5) zooms[id] = 5;
+
+    updateTransform(id);
+};
+
+window.toggleRecord = function (id) {
+    const btn = document.getElementById(`btn-record-${id}`);
+    const camStream = streams[id];
+
+    if (!camStream) { alert("Video belum tersambung!"); return; }
+
+    if (!recorders[id] || recorders[id].state === 'inactive') {
+        recordedChunks[id] = [];
+        recorders[id] = new MediaRecorder(camStream);
+
+        recorders[id].ondataavailable = (event) => {
+            if (event.data.size > 0) recordedChunks[id].push(event.data);
+        };
+
+        recorders[id].onstop = () => {
+            const blob = new Blob(recordedChunks[id], { type: 'video/webm' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = `CCTV-${id.replace('cctv-pribadi-', '')}-${new Date().getTime()}.webm`;
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => { document.body.removeChild(a); window.URL.revokeObjectURL(url); }, 100);
+        };
+
+        recorders[id].start();
+        btn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg> Stop`;
+        btn.classList.add('recording');
+    } else {
+        recorders[id].stop();
+        btn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="8"></circle></svg> Rekam`;
+        btn.classList.remove('recording');
+    }
+};
+
+btnAddCam.addEventListener('click', () => {
+    let camName = inputCamNameMonitor.value.trim().toLowerCase().replace(/\s+/g, '-');
+    if (!camName) return;
+
+    const fullCamID = "cctv-pribadi-" + camName;
+
+    if (activeCameras[fullCamID]) { alert("Kamera ini sudah dipantau!"); return; }
+
+    const wrapper = document.createElement('div');
+    wrapper.className = "video-wrapper bracket";
+
+    const iconZoomIn = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>`;
+    const iconZoomOut = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>`;
+    const iconRotate = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 2v6h-6"></path><path d="M3 12a9 9 0 109-9 9.75 9.75 0 00-6.74 2.74L3 8"></path></svg>`;
+    const iconRecord = `<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="8"></circle></svg>`;
+
+    wrapper.innerHTML = `
+        <div class="cam-title" id="title-${fullCamID}">CAM: ${camName.toUpperCase()}</div>
+        <div class="timestamp" id="time-${fullCamID}">00/00/0000 00:00:00</div>
+        <video id="video-${fullCamID}" autoplay playsinline controls></video>
+        <div class="cam-toolbar">
+            <button class="btn-tool" onclick="zoomCam('${fullCamID}', -0.25)" title="Zoom Out">${iconZoomOut}</button>
+            <button class="btn-tool" onclick="zoomCam('${fullCamID}', 0.25)" title="Zoom In">${iconZoomIn}</button>
+            <button class="btn-tool" onclick="rotateCam('${fullCamID}')">${iconRotate} Rotasi</button>
+            <button class="btn-tool" id="btn-record-${fullCamID}" onclick="toggleRecord('${fullCamID}')">${iconRecord} Rekam</button>
+        </div>
+    `;
+    videoGrid.appendChild(wrapper);
+    activeCameras[fullCamID] = true;
+    inputCamNameMonitor.value = "";
+
+    const conn = monitorPeer.connect(fullCamID);
+    conn.on('error', () => {
+        document.getElementById(`title-${fullCamID}`).className = "cam-title error";
+    });
+});
+</script>
+</body>
+</html>
