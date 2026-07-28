@@ -184,7 +184,10 @@ button{ display:inline-flex; align-items:center; justify-content:center; gap:6px
 .video-wrapper video{ position:absolute; top:0; left:0; width:100%; height:100%; object-fit:contain; transition:transform .3s ease; }
 
 .video-wrapper{ aspect-ratio:16/9; }
-.video-wrapper.rotated-box{ aspect-ratio:9/16; max-height:460px; }
+/* Rotated (vertical) frame: height is fixed via JS (kept identical to the
+   normal/horizontal frame height) and width shrinks to match the video's
+   true vertical aspect ratio, so the whole frame fits on one page. */
+.video-wrapper.rotated-box{ width:auto; max-width:100%; margin:0 auto; flex-shrink:0; }
 
 .cam-title{ position:absolute; top:12px; left:12px; background:rgba(11,9,6,.85); padding:5px 10px; border-radius:var(--radius); font-family:'JetBrains Mono', monospace; font-size:11.5px; font-weight:700; letter-spacing:.04em; color:var(--text); z-index:10; border-left:3px solid var(--amber); backdrop-filter:blur(4px); }
 .cam-title.live{ border-left-color:var(--green); }
@@ -207,6 +210,21 @@ button{ display:inline-flex; align-items:center; justify-content:center; gap:6px
 .live-badge.show{ display:flex; }
 .dot-live{ width:8px; height:8px; border-radius:50%; background:var(--red); box-shadow:0 0 6px 1px rgba(255,77,77,.5); animation:blink 1.4s infinite; flex-shrink:0; }
 @media (prefers-reduced-motion: reduce){ .dot-live{ animation:none; } }
+
+.buffer-badge{ position:absolute; top:12px; left:12px; z-index:11; display:none; align-items:center; gap:7px; background:rgba(11,9,6,.9); border:1px solid var(--amber); color:var(--amber); padding:6px 11px; border-radius:var(--radius); font-family:'JetBrains Mono', monospace; font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; backdrop-filter:blur(4px); }
+.buffer-badge.show{ display:flex; }
+.spinner-buffer{ width:11px; height:11px; border-radius:50%; border:2px solid rgba(255,178,56,.3); border-top-color:var(--amber); flex-shrink:0; animation:spin-buffer .7s linear infinite; }
+@keyframes spin-buffer{ to{ transform:rotate(360deg); } }
+@media (prefers-reduced-motion: reduce){ .spinner-buffer{ animation:none; } }
+
+.video-wrapper.gangguan{ outline:2px solid var(--amber); outline-offset:-2px; }
+
+.btn-talk.talking{ background:rgba(111,207,124,.14); color:var(--green); border-color:var(--green); animation:blink2 1.2s infinite; }
+
+.talk-indicator{ position:absolute; top:12px; left:12px; z-index:11; display:none; align-items:center; gap:8px; background:rgba(11,9,6,.88); border:1px solid var(--green); color:var(--green); padding:7px 13px; border-radius:var(--radius); font-family:'JetBrains Mono', monospace; font-size:11.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; backdrop-filter:blur(4px); }
+.talk-indicator.show{ display:flex; }
+.dot-talk{ width:8px; height:8px; border-radius:50%; background:var(--green); box-shadow:0 0 6px 1px rgba(111,207,124,.5); animation:blink 1s infinite; flex-shrink:0; }
+@media (prefers-reduced-motion: reduce){ .dot-talk{ animation:none; } }
 </style>
 </head>
 <body>
@@ -264,7 +282,9 @@ button{ display:inline-flex; align-items:center; justify-content:center; gap:6px
         <div class="rec-indicator"><div class="dot"></div> <span id="namaCamLabel">REC</span></div>
         <div class="status-badge" id="statusInfo">Memuat Kamera...</div>
     </div>
+    <div class="talk-indicator" id="talkIndicator"><span class="dot-talk"></span>Operator Berbicara</div>
     <video class="local-video" id="kameraLokal" autoplay playsinline muted></video>
+    <audio id="talkAudioPlayback" autoplay></audio>
     <div class="bottom-controls">
         <button id="btnSwitchCam" class="btn-switch">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 109-9 9.75 9.75 0 00-6.74 2.74L3 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 10-9 9 9.75 9.75 0 006.74-2.74L21 16"/></svg>
@@ -394,6 +414,20 @@ function setupPeerListeners() {
             activeMediaCall = null;
         });
     });
+
+    // Panggilan masuk khusus audio: dipakai fitur "Bicara" dari sisi monitor
+    const talkAudioEl = document.getElementById('talkAudioPlayback');
+    const talkIndicator = document.getElementById('talkIndicator');
+    camPeer.on('call', (call) => {
+        call.answer(); // tidak mengirim stream balik, hanya menerima audio operator
+        call.on('stream', (remoteAudioStream) => {
+            if (talkAudioEl) talkAudioEl.srcObject = remoteAudioStream;
+            if (talkIndicator) talkIndicator.classList.add('show');
+        });
+        call.on('close', () => {
+            if (talkIndicator) talkIndicator.classList.remove('show');
+        });
+    });
 }
 
 /* ============ MONITOR MODE LOGIC ============ */
@@ -411,6 +445,8 @@ let pans = {};
 let videoDims = {};
 let recorders = {};
 let recordedChunks = {};
+let talkStreams = {};
+let talkCalls = {};
 
 function initMonitorMode() {
     monitorInitialized = true;
@@ -438,17 +474,53 @@ function initMonitorMode() {
 
             streams[call.peer] = remoteStream;
 
+            const bufferBadge = document.getElementById(`buffer-${call.peer}`);
+            const wrapperEl = videoElement ? videoElement.parentElement : null;
+
+            const showBuffering = () => {
+                if (bufferBadge) bufferBadge.classList.add("show");
+                if (wrapperEl) wrapperEl.classList.add("gangguan");
+            };
+            const hideBuffering = () => {
+                if (bufferBadge) bufferBadge.classList.remove("show");
+                if (wrapperEl) wrapperEl.classList.remove("gangguan");
+            };
+
             if (videoElement) {
                 videoElement.srcObject = remoteStream;
                 if (titleBadge) titleBadge.className = "cam-title live";
                 if (liveBadge) liveBadge.classList.add("show");
+                hideBuffering();
 
                 videoElement.addEventListener('loadedmetadata', () => {
                     videoDims[call.peer] = { w: videoElement.videoWidth, h: videoElement.videoHeight };
                     updateTransform(call.peer);
                 });
 
+                // Indikator gangguan/buffering: muncul saat video menunggu data atau macet
+                videoElement.addEventListener('waiting', showBuffering);
+                videoElement.addEventListener('stalled', showBuffering);
+                videoElement.addEventListener('suspend', showBuffering);
+
+                // Hilang lagi begitu video lancar mengalir
+                videoElement.addEventListener('playing', hideBuffering);
+                videoElement.addEventListener('canplay', hideBuffering);
+
+                // Pantau juga kondisi koneksi WebRTC-nya
+                const pc = call.peerConnection;
+                if (pc) {
+                    pc.addEventListener('iceconnectionstatechange', () => {
+                        const state = pc.iceConnectionState;
+                        if (state === 'disconnected' || state === 'failed') {
+                            showBuffering();
+                        } else if (state === 'connected' || state === 'completed') {
+                            hideBuffering();
+                        }
+                    });
+                }
+
                 videoElement.addEventListener('ended', () => {
+                    hideBuffering();
                     if (liveBadge) liveBadge.classList.remove("show");
                     if (titleBadge) titleBadge.className = "cam-title error";
                 });
@@ -460,7 +532,11 @@ function initMonitorMode() {
         call.on('close', () => {
             const titleBadge = document.getElementById(`title-${call.peer}`);
             const liveBadge = document.getElementById(`live-${call.peer}`);
+            const bufferBadge = document.getElementById(`buffer-${call.peer}`);
+            const videoElement = document.getElementById(`video-${call.peer}`);
             if (liveBadge) liveBadge.classList.remove("show");
+            if (bufferBadge) bufferBadge.classList.remove("show");
+            if (videoElement && videoElement.parentElement) videoElement.parentElement.classList.remove("gangguan");
             if (titleBadge) titleBadge.className = "cam-title error";
         });
     });
@@ -472,17 +548,35 @@ window.updateTransform = function (id) {
     const wrapper = video.parentElement;
     const rot = rotations[id] || 0;
     const z = zooms[id] || 1;
-
-    wrapper.classList.remove('rotated-box');
-    if (rot === 90 || rot === 270) {
-        wrapper.classList.add('rotated-box');
-    }
-
+    const isRotated = (rot === 90 || rot === 270);
     const dims = videoDims[id];
-    if (dims && dims.w && dims.h) {
-        wrapper.style.aspectRatio = (rot === 90 || rot === 270)
-            ? `${dims.h} / ${dims.w}`
-            : `${dims.w} / ${dims.h}`;
+
+    if (isRotated) {
+        wrapper.classList.add('rotated-box');
+
+        // The frame's parent (.cam-card) always stretches to the full grid
+        // column width, so it's a reliable reference for "how tall would
+        // this frame normally be" even while the wrapper itself is narrowed.
+        const trackWidth = wrapper.parentElement.clientWidth || wrapper.clientWidth;
+
+        // Ratio (height/width) the frame would have when NOT rotated.
+        const normalHW = (dims && dims.w && dims.h) ? (dims.h / dims.w) : (9 / 16);
+        // Ratio (width/height) the frame should have WHEN rotated.
+        const rotatedWH = (dims && dims.w && dims.h) ? (dims.h / dims.w) : (9 / 16);
+
+        const frameHeight = trackWidth * normalHW;
+        const frameWidth = frameHeight * rotatedWH;
+
+        wrapper.style.aspectRatio = '';
+        wrapper.style.height = `${frameHeight}px`;
+        wrapper.style.width = `${frameWidth}px`;
+    } else {
+        wrapper.classList.remove('rotated-box');
+        wrapper.style.width = '';
+        wrapper.style.height = '';
+        wrapper.style.aspectRatio = (dims && dims.w && dims.h)
+            ? `${dims.w} / ${dims.h}`
+            : '';
     }
 
     requestAnimationFrame(() => {
@@ -617,6 +711,47 @@ window.toggleRecord = function (id) {
     }
 };
 
+async function startTalk(id) {
+    const btn = document.getElementById(`btn-talk-${id}`);
+    try {
+        if (!talkStreams[id]) {
+            talkStreams[id] = await navigator.mediaDevices.getUserMedia({
+                audio: { echoCancellation: true, noiseSuppression: true }
+            });
+        }
+        talkCalls[id] = monitorPeer.call(id, talkStreams[id]);
+        if (btn) { btn.classList.add('talking'); btn.innerHTML = btn.innerHTML.replace('Tahan Bicara', 'Bicara...'); }
+    } catch (err) {
+        alert('Tidak bisa mengakses mikrofon: ' + err.message);
+    }
+}
+
+function stopTalk(id) {
+    if (talkCalls[id]) {
+        talkCalls[id].close();
+        delete talkCalls[id];
+    }
+    if (talkStreams[id]) {
+        talkStreams[id].getTracks().forEach(t => t.stop());
+        delete talkStreams[id];
+    }
+    const btn = document.getElementById(`btn-talk-${id}`);
+    if (btn) { btn.classList.remove('talking'); btn.innerHTML = btn.innerHTML.replace('Bicara...', 'Tahan Bicara'); }
+}
+
+function setupTalkButton(id) {
+    const btn = document.getElementById(`btn-talk-${id}`);
+    if (!btn) return;
+
+    btn.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        startTalk(id);
+    });
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach(evt => {
+        btn.addEventListener(evt, () => stopTalk(id));
+    });
+}
+
 btnAddCam.addEventListener('click', () => {
     let camName = inputCamNameMonitor.value.trim().toLowerCase().replace(/\s+/g, '-');
     if (!camName) return;
@@ -632,6 +767,7 @@ btnAddCam.addEventListener('click', () => {
     const iconZoomOut = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>`;
     const iconRotate = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 2v6h-6"></path><path d="M3 12a9 9 0 109-9 9.75 9.75 0 00-6.74 2.74L3 8"></path></svg>`;
     const iconRecord = `<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="8"></circle></svg>`;
+    const iconMic = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
 
     card.innerHTML = `
         <div class="video-wrapper bracket">
@@ -639,18 +775,21 @@ btnAddCam.addEventListener('click', () => {
             <div class="timestamp" id="time-${fullCamID}">00/00/0000 00:00:00</div>
             <video id="video-${fullCamID}" autoplay playsinline controls></video>
             <div class="live-badge" id="live-${fullCamID}"><span class="dot-live"></span>Live</div>
+            <div class="buffer-badge" id="buffer-${fullCamID}"><span class="spinner-buffer"></span>Buffering...</div>
         </div>
         <div class="cam-toolbar">
             <button class="btn-tool" onclick="zoomCam('${fullCamID}', -0.25)" title="Zoom Out">${iconZoomOut}</button>
             <button class="btn-tool" onclick="zoomCam('${fullCamID}', 0.25)" title="Zoom In">${iconZoomIn}</button>
             <button class="btn-tool" onclick="rotateCam('${fullCamID}')">${iconRotate} Rotasi</button>
             <button class="btn-tool" id="btn-record-${fullCamID}" onclick="toggleRecord('${fullCamID}')">${iconRecord} Rekam</button>
+            <button class="btn-tool btn-talk" id="btn-talk-${fullCamID}" title="Tekan &amp; tahan untuk bicara">${iconMic} Tahan Bicara</button>
         </div>
     `;
     videoGrid.appendChild(card);
     activeCameras[fullCamID] = true;
     inputCamNameMonitor.value = "";
     setupPanDrag(fullCamID);
+    setupTalkButton(fullCamID);
 
     const conn = monitorPeer.connect(fullCamID);
     conn.on('error', () => {
