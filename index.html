@@ -555,17 +555,25 @@ window.updateTransform = function (id) {
         wrapper.classList.add('rotated-box');
 
         // The frame's parent (.cam-card) always stretches to the full grid
-        // column width, so it's a reliable reference for "how tall would
-        // this frame normally be" even while the wrapper itself is narrowed.
+        // column width, so it's a reliable reference for "how big can this
+        // frame get" even while the wrapper itself is narrowed.
         const trackWidth = wrapper.parentElement.clientWidth || wrapper.clientWidth;
 
-        // Ratio (height/width) the frame would have when NOT rotated.
-        const normalHW = (dims && dims.w && dims.h) ? (dims.h / dims.w) : (9 / 16);
-        // Ratio (width/height) the frame should have WHEN rotated.
-        const rotatedWH = (dims && dims.w && dims.h) ? (dims.h / dims.w) : (9 / 16);
+        // Rotating 90deg/270deg swaps the video's native w/h, so the box's
+        // width/height ratio once rotated is the source video's h/w.
+        const rotatedAR = (dims && dims.w && dims.h) ? (dims.h / dims.w) : (9 / 16);
 
-        const frameHeight = trackWidth * normalHW;
-        const frameWidth = frameHeight * rotatedWH;
+        // Fit that ratio inside a trackWidth x trackWidth box (like
+        // object-fit: contain) so the window always follows the source
+        // video's real orientation — landscape source -> wide box after
+        // rotating, portrait source -> tall box — without ever overflowing
+        // past the grid column in either dimension.
+        let frameWidth = trackWidth;
+        let frameHeight = frameWidth / rotatedAR;
+        if (frameHeight > trackWidth) {
+            frameHeight = trackWidth;
+            frameWidth = frameHeight * rotatedAR;
+        }
 
         wrapper.style.aspectRatio = '';
         wrapper.style.height = `${frameHeight}px`;
