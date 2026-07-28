@@ -219,6 +219,10 @@ button{ display:inline-flex; align-items:center; justify-content:center; gap:6px
 
 .video-wrapper.gangguan{ outline:2px solid var(--amber); outline-offset:-2px; }
 
+.resize-handle{ position:absolute; right:0; bottom:0; width:24px; height:24px; z-index:15; cursor:nwse-resize; display:flex; align-items:flex-end; justify-content:flex-end; padding:4px; touch-action:none; }
+.resize-handle::before{ content:""; width:10px; height:10px; border-right:2px solid var(--text-dim); border-bottom:2px solid var(--text-dim); opacity:.5; transition:.15s; }
+.resize-handle:hover::before{ border-color:var(--amber); opacity:1; }
+
 .btn-talk.talking{ background:rgba(111,207,124,.14); color:var(--green); border-color:var(--green); animation:blink2 1.2s infinite; }
 
 .talk-indicator{ position:absolute; top:12px; left:12px; z-index:11; display:none; align-items:center; gap:8px; background:rgba(11,9,6,.88); border:1px solid var(--green); color:var(--green); padding:7px 13px; border-radius:var(--radius); font-family:'JetBrains Mono', monospace; font-size:11.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; backdrop-filter:blur(4px); }
@@ -447,6 +451,7 @@ let recorders = {};
 let recordedChunks = {};
 let talkStreams = {};
 let talkCalls = {};
+let manualHeights = {};
 
 function initMonitorMode() {
     monitorInitialized = true;
@@ -581,10 +586,17 @@ window.updateTransform = function (id) {
     } else {
         wrapper.classList.remove('rotated-box');
         wrapper.style.width = '';
-        wrapper.style.height = '';
-        wrapper.style.aspectRatio = (dims && dims.w && dims.h)
-            ? `${dims.w} / ${dims.h}`
-            : '';
+
+        if (manualHeights[id]) {
+            // Manual height overrides the aspect-ratio-driven sizing.
+            wrapper.style.aspectRatio = '';
+            wrapper.style.height = `${manualHeights[id]}px`;
+        } else {
+            wrapper.style.height = '';
+            wrapper.style.aspectRatio = (dims && dims.w && dims.h)
+                ? `${dims.w} / ${dims.h}`
+                : '';
+        }
     }
 
     requestAnimationFrame(() => {
@@ -681,6 +693,56 @@ function setupPanDrag(id) {
         e.preventDefault();
         zoomCam(id, e.deltaY < 0 ? 0.1 : -0.1);
     }, { passive: false });
+}
+
+function setupResizeHandle(id) {
+    const handle = document.getElementById(`resize-${id}`);
+    const wrapper = handle ? handle.parentElement : null;
+    if (!handle || !wrapper) return;
+
+    const MIN_HEIGHT = 100;
+    const MAX_HEIGHT = 720;
+
+    let resizing = false;
+    let startY = 0, startHeight = 0;
+
+    handle.addEventListener('pointerdown', (e) => {
+        // Rotated frames get their height computed to match the source
+        // video's real orientation — manual drag-resize only applies to
+        // the normal (non-rotated) layout.
+        if (rotations[id] === 90 || rotations[id] === 270) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+        resizing = true;
+        startY = e.clientY;
+        startHeight = manualHeights[id] || wrapper.getBoundingClientRect().height;
+        handle.setPointerCapture(e.pointerId);
+    });
+
+    handle.addEventListener('pointermove', (e) => {
+        if (!resizing) return;
+        const delta = e.clientY - startY;
+        let newHeight = startHeight + delta;
+        newHeight = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, newHeight));
+        manualHeights[id] = newHeight;
+        updateTransform(id);
+    });
+
+    const endResize = (e) => {
+        if (!resizing) return;
+        resizing = false;
+        try { handle.releasePointerCapture(e.pointerId); } catch (_) {}
+    };
+    handle.addEventListener('pointerup', endResize);
+    handle.addEventListener('pointercancel', endResize);
+    handle.addEventListener('pointerleave', endResize);
+
+    // Double-click/tap the handle to reset to the automatic aspect-ratio height.
+    handle.addEventListener('dblclick', () => {
+        delete manualHeights[id];
+        updateTransform(id);
+    });
 }
 
 window.toggleRecord = function (id) {
@@ -784,6 +846,7 @@ btnAddCam.addEventListener('click', () => {
             <video id="video-${fullCamID}" autoplay playsinline controls></video>
             <div class="live-badge" id="live-${fullCamID}"><span class="dot-live"></span>Live</div>
             <div class="buffer-badge" id="buffer-${fullCamID}"><span class="spinner-buffer"></span>Buffering...</div>
+            <div class="resize-handle" id="resize-${fullCamID}" title="Tarik untuk mengubah ukuran"></div>
         </div>
         <div class="cam-toolbar">
             <button class="btn-tool" onclick="zoomCam('${fullCamID}', -0.25)" title="Zoom Out">${iconZoomOut}</button>
@@ -798,6 +861,7 @@ btnAddCam.addEventListener('click', () => {
     inputCamNameMonitor.value = "";
     setupPanDrag(fullCamID);
     setupTalkButton(fullCamID);
+    setupResizeHandle(fullCamID);
 
     const conn = monitorPeer.connect(fullCamID);
     conn.on('error', () => {
