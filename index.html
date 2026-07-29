@@ -199,6 +199,17 @@ button{ display:inline-flex; align-items:center; justify-content:center; gap:6px
 .win-icon-btn:hover{ border-color:var(--amber); color:var(--amber); }
 .win-icon-btn svg{ width:15px; height:15px; }
 
+.net-quality{ background:rgba(11,9,6,.85); border:1px solid var(--border); border-radius:var(--radius); padding:0 7px; display:flex; align-items:flex-end; gap:2px; backdrop-filter:blur(4px); height:22px; box-sizing:border-box; cursor:default; }
+.net-quality .bar{ width:3.5px; border-radius:1px; background:var(--text-faint); opacity:.35; transition:background .25s ease, opacity .25s ease; }
+.net-quality .bar:nth-child(1){ height:5px; }
+.net-quality .bar:nth-child(2){ height:8px; }
+.net-quality .bar:nth-child(3){ height:11px; }
+.net-quality .bar:nth-child(4){ height:14px; }
+.net-quality.net-excellent .bar{ background:var(--green); opacity:1; }
+.net-quality.net-good .bar:nth-child(-n+3){ background:var(--amber); opacity:1; }
+.net-quality.net-weak .bar:nth-child(-n+2){ background:var(--amber); opacity:1; }
+.net-quality.net-poor .bar:nth-child(1){ background:var(--red); opacity:1; }
+
 .cam-card{ display:flex; flex-direction:column; gap:10px; }
 
 .cam-toolbar{ display:flex; gap:8px; flex-wrap:wrap; justify-content:center; background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:10px; }
@@ -283,7 +294,12 @@ button{ display:inline-flex; align-items:center; justify-content:center; gap:6px
 <div class="cam-container" id="camContainer">
     <div class="overlay">
         <div class="rec-indicator"><div class="dot"></div> <span id="namaCamLabel">REC</span></div>
-        <div class="status-badge" id="statusInfo">Memuat Kamera...</div>
+        <div style="display:flex; align-items:center; gap:10px;">
+            <div class="net-quality" id="netqCam" title="Menunggu data jaringan...">
+                <span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span>
+            </div>
+            <div class="status-badge" id="statusInfo">Memuat Kamera...</div>
+        </div>
     </div>
     <video class="local-video" id="kameraLokal" autoplay playsinline muted></video>
     <audio id="talkAudioPlayback" autoplay></audio>
@@ -350,6 +366,31 @@ document.getElementById('btnBackFromSetup').addEventListener('click', () => {
 document.getElementById('btnBackFromMonitor').addEventListener('click', () => {
     showOnly(modeSelectScreen);
 });
+
+/* ============ NETWORK QUALITY HELPER (dipakai Kamera & Monitor) ============ */
+function classifyNetQuality(rttMs, lossPercent) {
+    if (rttMs === null || rttMs === undefined) return 'unknown';
+    if (rttMs < 150 && lossPercent < 1) return 'excellent';
+    if (rttMs < 300 && lossPercent < 3) return 'good';
+    if (rttMs < 600 && lossPercent < 8) return 'weak';
+    return 'poor';
+}
+
+function renderNetQuality(el, rttMs, lossPercent) {
+    if (!el) return;
+    const quality = classifyNetQuality(rttMs, lossPercent);
+    el.className = 'net-quality' + (quality !== 'unknown' ? ` net-${quality}` : '');
+
+    const rttLabel = (rttMs !== null && rttMs !== undefined) ? `${Math.round(rttMs)} ms` : '-';
+    const qualityLabel = { excellent: 'Sangat Baik', good: 'Baik', weak: 'Lemah', poor: 'Buruk', unknown: 'Menunggu data' }[quality];
+    el.title = `Sinyal: ${qualityLabel} · Ping: ${rttLabel} · Packet loss: ${lossPercent.toFixed(1)}%`;
+}
+
+function resetNetQuality(el) {
+    if (!el) return;
+    el.className = 'net-quality';
+    el.title = 'Menunggu data jaringan...';
+}
 
 /* ============ KAMERA MODE LOGIC ============ */
 const inputCamNameKamera = document.getElementById('inputCamNameKamera');
@@ -452,6 +493,55 @@ btnSwitchCam.addEventListener('click', () => {
     mulaiKamera();
 });
 
+/* ============ PEMANTAU KUALITAS JARINGAN (sisi Kamera) ============ */
+let camStatsInterval = null;
+let camLastStats = null;
+
+function startCamStatsMonitoring() {
+    stopCamStatsMonitoring();
+    camStatsInterval = setInterval(() => {
+        if (!activeMediaCall || !activeMediaCall.peerConnection) return;
+
+        activeMediaCall.peerConnection.getStats(null).then((statsReport) => {
+            let rtt = null;
+            let packetsLost = 0;
+            let packetsSent = 0;
+
+            statsReport.forEach((report) => {
+                if (report.type === 'candidate-pair' && report.state === 'succeeded' && typeof report.currentRoundTripTime === 'number') {
+                    rtt = report.currentRoundTripTime * 1000;
+                }
+                if (report.type === 'remote-inbound-rtp' && report.kind === 'video' && typeof report.packetsLost === 'number') {
+                    packetsLost = report.packetsLost;
+                }
+                if (report.type === 'outbound-rtp' && report.kind === 'video' && typeof report.packetsSent === 'number') {
+                    packetsSent = report.packetsSent;
+                }
+            });
+
+            let lossPercent = 0;
+            if (camLastStats) {
+                const deltaLost = Math.max(0, packetsLost - camLastStats.packetsLost);
+                const deltaSent = Math.max(0, packetsSent - camLastStats.packetsSent);
+                const deltaTotal = deltaLost + deltaSent;
+                lossPercent = deltaTotal > 0 ? (deltaLost / deltaTotal) * 100 : 0;
+            }
+            camLastStats = { packetsLost, packetsSent };
+
+            renderNetQuality(document.getElementById('netqCam'), rtt, lossPercent);
+        }).catch(() => {});
+    }, 3000);
+}
+
+function stopCamStatsMonitoring() {
+    if (camStatsInterval) {
+        clearInterval(camStatsInterval);
+        camStatsInterval = null;
+    }
+    camLastStats = null;
+    resetNetQuality(document.getElementById('netqCam'));
+}
+
 function setupPeerListeners() {
     camPeer.on('open', () => {
         statusInfo.innerText = "Online & Siap";
@@ -466,6 +556,7 @@ function setupPeerListeners() {
             statusInfo.className = "status-badge watching";
             activeMediaCall = camPeer.call(conn.peer, localStream);
             sendFlashStatus();
+            startCamStatsMonitoring();
         });
         conn.on('data', (data) => {
             if (data && data.type === 'toggleFlash') {
@@ -477,6 +568,7 @@ function setupPeerListeners() {
             statusInfo.className = "status-badge active";
             activeMediaCall = null;
             if (activeConn === conn) activeConn = null;
+            stopCamStatsMonitoring();
         });
     });
 
@@ -521,6 +613,8 @@ let connStates = {};
 let camNames = {};
 let flashSupportedMap = {};
 let flashOnMap = {};
+let statsIntervals = {};
+let lastStats = {};
 
 const iconZoomIn = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>`;
 const iconZoomOut = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>`;
@@ -549,6 +643,7 @@ function initMonitorMode() {
     monitorPeer.on('call', (call) => {
         call.answer();
         mediaCalls[call.peer] = call;
+        startStatsMonitoring(call.peer);
 
         call.on('stream', (remoteStream) => {
             const videoElement = document.getElementById(`video-${call.peer}`);
@@ -584,9 +679,56 @@ function initMonitorMode() {
             if (titleBadge) titleBadge.className = "cam-title error";
 
             delete mediaCalls[call.peer];
+            stopStatsMonitoring(call.peer);
             if (connStates[call.peer] !== 'disconnected') updateConnStatus(call.peer, 'error');
         });
     });
+}
+
+/* ============ PEMANTAU KUALITAS JARINGAN (sisi Monitor, per kamera) ============ */
+function startStatsMonitoring(id) {
+    stopStatsMonitoring(id);
+    statsIntervals[id] = setInterval(() => {
+        const call = mediaCalls[id];
+        if (!call || !call.peerConnection) return;
+
+        call.peerConnection.getStats(null).then((statsReport) => {
+            let rtt = null;
+            let packetsLost = 0;
+            let packetsReceived = 0;
+
+            statsReport.forEach((report) => {
+                if (report.type === 'candidate-pair' && report.state === 'succeeded' && typeof report.currentRoundTripTime === 'number') {
+                    rtt = report.currentRoundTripTime * 1000;
+                }
+                if (report.type === 'inbound-rtp' && report.kind === 'video') {
+                    if (typeof report.packetsLost === 'number') packetsLost = report.packetsLost;
+                    if (typeof report.packetsReceived === 'number') packetsReceived = report.packetsReceived;
+                }
+            });
+
+            let lossPercent = 0;
+            const prev = lastStats[id];
+            if (prev) {
+                const deltaLost = Math.max(0, packetsLost - prev.packetsLost);
+                const deltaReceived = Math.max(0, packetsReceived - prev.packetsReceived);
+                const deltaTotal = deltaLost + deltaReceived;
+                lossPercent = deltaTotal > 0 ? (deltaLost / deltaTotal) * 100 : 0;
+            }
+            lastStats[id] = { packetsLost, packetsReceived };
+
+            renderNetQuality(document.getElementById(`netq-${id}`), rtt, lossPercent);
+        }).catch(() => {});
+    }, 3000);
+}
+
+function stopStatsMonitoring(id) {
+    if (statsIntervals[id]) {
+        clearInterval(statsIntervals[id]);
+        delete statsIntervals[id];
+    }
+    delete lastStats[id];
+    resetNetQuality(document.getElementById(`netq-${id}`));
 }
 
 function updateConnStatus(id, status) {
@@ -691,6 +833,7 @@ window.disconnectCam = function (id) {
     if (video) video.srcObject = null;
     streams[id] = null;
 
+    stopStatsMonitoring(id);
     flashSupportedMap[id] = false;
     updateFlashButtonUI(id);
 };
@@ -920,6 +1063,9 @@ btnAddCam.addEventListener('click', () => {
         <div class="video-wrapper bracket">
             <div class="cam-title" id="title-${fullCamID}">CAM: ${camName.toUpperCase()}</div>
             <div class="top-right-cluster">
+                <div class="net-quality" id="netq-${fullCamID}" title="Menunggu data jaringan...">
+                    <span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span>
+                </div>
                 <div class="timestamp" id="time-${fullCamID}">00/00/0000 00:00:00</div>
                 <button class="win-icon-btn" onclick="rotateCam('${fullCamID}')" title="Rotasi Layar">${iconRotate}</button>
             </div>
