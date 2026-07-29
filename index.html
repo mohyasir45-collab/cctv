@@ -187,6 +187,7 @@ button{ display:inline-flex; align-items:center; justify-content:center; gap:6px
 
 .video-wrapper{ aspect-ratio:16/9; }
 .video-wrapper.rotated-box{ aspect-ratio:9/16; max-height:460px; }
+.video-wrapper:fullscreen, .video-wrapper:-webkit-full-screen{ aspect-ratio:auto !important; max-height:none !important; width:100vw; height:100vh; background:#000; }
 
 .cam-title{ position:absolute; top:12px; left:12px; background:rgba(11,9,6,.85); padding:5px 10px; border-radius:var(--radius); font-family:'JetBrains Mono', monospace; font-size:11.5px; font-weight:700; letter-spacing:.04em; color:var(--text); z-index:10; border-left:3px solid var(--amber); backdrop-filter:blur(4px); }
 .cam-title.live{ border-left-color:var(--green); }
@@ -198,6 +199,12 @@ button{ display:inline-flex; align-items:center; justify-content:center; gap:6px
 .win-icon-btn{ background:rgba(11,9,6,.85); border:1px solid var(--border-bright); color:var(--text); width:30px; height:30px; border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer; backdrop-filter:blur(4px); transition:.15s ease; padding:0; }
 .win-icon-btn:hover{ border-color:var(--amber); color:var(--amber); }
 .win-icon-btn svg{ width:15px; height:15px; }
+
+.video-controls-bar{ position:absolute; bottom:0; left:0; right:0; display:flex; align-items:center; gap:10px; padding:8px 12px; background:linear-gradient(to top, rgba(11,9,6,.92), rgba(11,9,6,.55) 70%, transparent); z-index:15; }
+.video-controls-bar button{ background:transparent; border:none; color:var(--text); cursor:pointer; padding:4px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.video-controls-bar button:hover{ color:var(--amber); }
+.video-controls-bar button svg{ width:17px; height:17px; }
+.video-controls-bar input[type="range"]{ flex:0 0 70px; width:70px; height:3px; accent-color:var(--amber); cursor:pointer; }
 
 .net-quality{ background:rgba(11,9,6,.85); border:1px solid var(--border); border-radius:var(--radius); padding:0 7px; display:flex; align-items:flex-end; gap:2px; backdrop-filter:blur(4px); height:22px; box-sizing:border-box; cursor:default; }
 .net-quality .bar{ width:3.5px; border-radius:1px; background:var(--text-faint); opacity:.35; transition:background .25s ease, opacity .25s ease; }
@@ -623,6 +630,9 @@ const iconRecord = `<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12"
 const iconMic = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
 const iconPower = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>`;
 const iconFlash = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>`;
+const iconVolumeOn = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.5 8.5a5 5 0 0 1 0 7"></path><path d="M18.5 5.5a9 9 0 0 1 0 13"></path></svg>`;
+const iconVolumeMute = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>`;
+const iconFullscreen = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 3H5a2 2 0 0 0-2 2v3"></path><path d="M16 3h3a2 2 0 0 1 2 2v3"></path><path d="M8 21H5a2 2 0 0 1-2-2v-3"></path><path d="M16 21h3a2 2 0 0 0 2-2v-3"></path></svg>`;
 
 function initMonitorMode() {
     monitorInitialized = true;
@@ -654,6 +664,7 @@ function initMonitorMode() {
 
             if (videoElement) {
                 videoElement.srcObject = remoteStream;
+                updateMuteIcon(call.peer);
                 if (titleBadge) titleBadge.className = "cam-title live";
                 if (liveBadge) liveBadge.classList.add("show");
                 updateConnStatus(call.peer, 'live');
@@ -923,6 +934,53 @@ window.zoomCam = function (id, amount) {
     updateTransform(id);
 };
 
+function updateMuteIcon(id) {
+    const btn = document.getElementById(`btn-mute-${id}`);
+    const video = document.getElementById(`video-${id}`);
+    if (!btn || !video) return;
+    btn.innerHTML = (video.muted || video.volume === 0) ? iconVolumeMute : iconVolumeOn;
+}
+
+window.toggleMuteCam = function (id) {
+    const video = document.getElementById(`video-${id}`);
+    if (!video) return;
+    if (video.volume === 0 && video.muted) video.volume = 1;
+    video.muted = !video.muted;
+    const range = document.getElementById(`range-vol-${id}`);
+    if (range) range.value = video.muted ? 0 : video.volume;
+    updateMuteIcon(id);
+};
+
+window.setVolumeCam = function (id, value) {
+    const video = document.getElementById(`video-${id}`);
+    if (!video) return;
+    const vol = parseFloat(value);
+    video.volume = vol;
+    video.muted = (vol === 0);
+    updateMuteIcon(id);
+};
+
+window.toggleFullscreenCam = function (id) {
+    const wrapper = document.getElementById(`wrapper-${id}`);
+    if (!wrapper) return;
+
+    const isFs = document.fullscreenElement || document.webkitFullscreenElement;
+    if (!isFs) {
+        const req = wrapper.requestFullscreen || wrapper.webkitRequestFullscreen;
+        if (req) req.call(wrapper);
+    } else {
+        const exit = document.exitFullscreen || document.webkitExitFullscreen;
+        if (exit) exit.call(document);
+    }
+};
+
+document.addEventListener('fullscreenchange', () => {
+    Object.keys(activeCameras).forEach(id => updateTransform(id));
+});
+document.addEventListener('webkitfullscreenchange', () => {
+    Object.keys(activeCameras).forEach(id => updateTransform(id));
+});
+
 function setupPanDrag(id) {
     const video = document.getElementById(`video-${id}`);
     if (!video) return;
@@ -1060,7 +1118,7 @@ btnAddCam.addEventListener('click', () => {
     card.className = "cam-card";
 
     card.innerHTML = `
-        <div class="video-wrapper bracket">
+        <div class="video-wrapper bracket" id="wrapper-${fullCamID}">
             <div class="cam-title" id="title-${fullCamID}">CAM: ${camName.toUpperCase()}</div>
             <div class="top-right-cluster">
                 <div class="net-quality" id="netq-${fullCamID}" title="Menunggu data jaringan...">
@@ -1069,8 +1127,13 @@ btnAddCam.addEventListener('click', () => {
                 <div class="timestamp" id="time-${fullCamID}">00/00/0000 00:00:00</div>
                 <button class="win-icon-btn" onclick="rotateCam('${fullCamID}')" title="Rotasi Layar">${iconRotate}</button>
             </div>
-            <video id="video-${fullCamID}" autoplay playsinline controls></video>
+            <video id="video-${fullCamID}" autoplay playsinline></video>
             <div class="live-badge" id="live-${fullCamID}"><span class="dot-live"></span>Live</div>
+            <div class="video-controls-bar">
+                <button id="btn-mute-${fullCamID}" onclick="toggleMuteCam('${fullCamID}')" title="Bisukan/aktifkan suara">${iconVolumeOn}</button>
+                <input type="range" id="range-vol-${fullCamID}" min="0" max="1" step="0.05" value="1" oninput="setVolumeCam('${fullCamID}', this.value)" title="Volume">
+                <button id="btn-fullscreen-${fullCamID}" onclick="toggleFullscreenCam('${fullCamID}')" title="Layar Penuh" style="margin-left:auto;">${iconFullscreen}</button>
+            </div>
         </div>
         <div class="cam-toolbar">
             <button class="btn-tool" onclick="zoomCam('${fullCamID}', -0.25)" title="Zoom Out">${iconZoomOut}</button>
