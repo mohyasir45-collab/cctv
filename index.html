@@ -217,6 +217,8 @@ button{ display:inline-flex; align-items:center; justify-content:center; gap:6px
 .btn-tool.btn-danger:hover{ background:rgba(255,77,77,.12); border-color:var(--red); color:#ffb0b0; }
 .btn-tool.btn-reconnect{ color:var(--green); border-color:rgba(111,207,124,.5); }
 .btn-tool.btn-reconnect:hover{ background:rgba(111,207,124,.12); border-color:var(--green); color:var(--green); }
+.btn-tool.flash-active{ background:var(--amber); color:#1a1206; border-color:var(--amber); }
+.btn-tool.flash-active:hover{ color:#1a1206; }
 
 .live-badge{ position:absolute; bottom:12px; right:12px; z-index:10; display:none; align-items:center; gap:7px; background:rgba(11,9,6,.85); border:1px solid var(--red); color:var(--red); padding:6px 11px; border-radius:var(--radius); font-family:'JetBrains Mono', monospace; font-size:11px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; backdrop-filter:blur(4px); }
 .live-badge.show{ display:flex; }
@@ -362,6 +364,7 @@ let camPeer = null;
 let currentFacingMode = "environment";
 let localStream = null;
 let activeMediaCall = null;
+let activeConn = null;
 let flashOn = false;
 let flashSupported = false;
 
@@ -410,6 +413,7 @@ function checkFlashSupport() {
         flashSupported = !!caps.torch;
     }
     updateFlashButton();
+    sendFlashStatus();
 }
 
 function updateFlashButton() {
@@ -421,17 +425,26 @@ function updateFlashButton() {
     btnToggleFlash.classList.toggle('flash-active', flashOn);
 }
 
-btnToggleFlash.addEventListener('click', () => {
-    const videoTrack = localStream ? localStream.getVideoTracks()[0] : null;
-    if (!videoTrack) return;
+function sendFlashStatus() {
+    if (activeConn && activeConn.open) {
+        activeConn.send({ type: 'flashStatus', supported: flashSupported, on: flashOn });
+    }
+}
 
-    const newState = !flashOn;
-    videoTrack.applyConstraints({ advanced: [{ torch: newState }] })
+function setFlash(newState) {
+    const videoTrack = localStream ? localStream.getVideoTracks()[0] : null;
+    if (!videoTrack || !flashSupported) return Promise.reject(new Error("Flash tidak didukung"));
+
+    return videoTrack.applyConstraints({ advanced: [{ torch: newState }] })
         .then(() => {
             flashOn = newState;
             updateFlashButton();
-        })
-        .catch(() => { alert("Flash tidak didukung pada kamera ini."); });
+            sendFlashStatus();
+        });
+}
+
+btnToggleFlash.addEventListener('click', () => {
+    setFlash(!flashOn).catch(() => { alert("Flash tidak didukung pada kamera ini."); });
 });
 
 btnSwitchCam.addEventListener('click', () => {
@@ -446,15 +459,24 @@ function setupPeerListeners() {
     });
     camPeer.on('connection', (conn) => {
         statusInfo.innerText = "Menyiapkan Video...";
+        activeConn = conn;
+
         conn.on('open', () => {
             statusInfo.innerText = "Sedang Dipantau";
             statusInfo.className = "status-badge watching";
             activeMediaCall = camPeer.call(conn.peer, localStream);
+            sendFlashStatus();
+        });
+        conn.on('data', (data) => {
+            if (data && data.type === 'toggleFlash') {
+                setFlash(!flashOn).catch(() => { sendFlashStatus(); });
+            }
         });
         conn.on('close', () => {
             statusInfo.innerText = "Online & Siap";
             statusInfo.className = "status-badge active";
             activeMediaCall = null;
+            if (activeConn === conn) activeConn = null;
         });
     });
 
@@ -497,6 +519,8 @@ let connections = {};
 let mediaCalls = {};
 let connStates = {};
 let camNames = {};
+let flashSupportedMap = {};
+let flashOnMap = {};
 
 const iconZoomIn = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>`;
 const iconZoomOut = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>`;
@@ -504,6 +528,7 @@ const iconRotate = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" s
 const iconRecord = `<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="8"></circle></svg>`;
 const iconMic = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
 const iconPower = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>`;
+const iconFlash = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>`;
 
 function initMonitorMode() {
     monitorInitialized = true;
@@ -607,11 +632,42 @@ function connectCam(id) {
         updateConnStatus(id, 'error');
     });
 
+    conn.on('data', (data) => {
+        handleCamData(id, data);
+    });
+
     conn.on('close', () => {
         delete connections[id];
+        flashSupportedMap[id] = false;
+        updateFlashButtonUI(id);
         if (connStates[id] !== 'disconnected') updateConnStatus(id, 'error');
     });
 }
+
+function handleCamData(id, data) {
+    if (!data || data.type !== 'flashStatus') return;
+    flashSupportedMap[id] = !!data.supported;
+    flashOnMap[id] = !!data.on;
+    updateFlashButtonUI(id);
+}
+
+function updateFlashButtonUI(id) {
+    const btn = document.getElementById(`btn-flash-${id}`);
+    if (!btn) return;
+
+    if (!flashSupportedMap[id]) {
+        btn.style.display = 'none';
+        return;
+    }
+    btn.style.display = 'inline-flex';
+    btn.classList.toggle('flash-active', !!flashOnMap[id]);
+}
+
+window.toggleFlashCam = function (id) {
+    const conn = connections[id];
+    if (!conn || !conn.open) { alert("Kamera tidak terhubung!"); return; }
+    conn.send({ type: 'toggleFlash' });
+};
 
 window.disconnectCam = function (id) {
     updateConnStatus(id, 'disconnected');
@@ -634,6 +690,9 @@ window.disconnectCam = function (id) {
     const video = document.getElementById(`video-${id}`);
     if (video) video.srcObject = null;
     streams[id] = null;
+
+    flashSupportedMap[id] = false;
+    updateFlashButtonUI(id);
 };
 
 window.reconnectCam = function (id) {
@@ -871,6 +930,7 @@ btnAddCam.addEventListener('click', () => {
             <button class="btn-tool" onclick="zoomCam('${fullCamID}', -0.25)" title="Zoom Out">${iconZoomOut}</button>
             <button class="btn-tool" onclick="zoomCam('${fullCamID}', 0.25)" title="Zoom In">${iconZoomIn}</button>
             <button class="btn-tool btn-talk" id="btn-talk-${fullCamID}" title="Tahan untuk bicara ke kamera">${iconMic} Bicara</button>
+            <button class="btn-tool" id="btn-flash-${fullCamID}" style="display:none;" onclick="toggleFlashCam('${fullCamID}')" title="Nyalakan/matikan flash kamera">${iconFlash} Flash</button>
             <button class="btn-tool" id="btn-record-${fullCamID}" onclick="toggleRecord('${fullCamID}')">${iconRecord} Rekam</button>
             <button class="btn-tool btn-danger" id="btn-conn-${fullCamID}" onclick="toggleConnCam('${fullCamID}')">${iconPower} Putuskan</button>
         </div>
