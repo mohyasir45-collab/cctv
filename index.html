@@ -162,9 +162,11 @@ video.local-video{ width:100%; height:100%; object-fit:contain; background:#000;
 .status-badge.active{ background:rgba(111,207,124,.08); border-color:var(--green); color:var(--green); }
 .status-badge.watching{ background:rgba(255,178,56,.08); border-color:var(--amber); color:var(--amber); }
 
-.bottom-controls{ position:absolute; bottom:40px; left:0; right:0; display:flex; justify-content:center; z-index:10; }
+.bottom-controls{ position:absolute; bottom:40px; left:0; right:0; display:flex; justify-content:center; gap:12px; z-index:10; }
 .btn-switch{ background:rgba(11,9,6,.85); border:1px solid var(--border-bright); color:var(--text); padding:13px 24px; border-radius:var(--radius); font-family:'JetBrains Mono', monospace; font-size:12.5px; letter-spacing:.08em; text-transform:uppercase; cursor:pointer; display:flex; align-items:center; gap:9px; backdrop-filter:blur(4px); transition:.15s ease; }
 .btn-switch:hover{ border-color:var(--amber); color:var(--amber); }
+.btn-switch.flash-active{ background:var(--amber); color:#1a1206; border-color:var(--amber); }
+.btn-switch.flash-active:hover{ color:#1a1206; }
 
 /* ============ MONITOR PANEL ============ */
 #monitorScreen{ display:none; flex-direction:column; align-items:center; min-height:100vh; padding:24px; }
@@ -289,6 +291,10 @@ button{ display:inline-flex; align-items:center; justify-content:center; gap:6px
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 109-9 9.75 9.75 0 00-6.74 2.74L3 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 10-9 9 9.75 9.75 0 006.74-2.74L21 16"/></svg>
             Ganti Kamera
         </button>
+        <button id="btnToggleFlash" class="btn-switch" style="display:none;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+            Flash
+        </button>
     </div>
 </div>
 
@@ -349,12 +355,15 @@ const btnStart = document.getElementById('btnStart');
 const videoElement = document.getElementById('kameraLokal');
 const statusInfo = document.getElementById('statusInfo');
 const btnSwitchCam = document.getElementById('btnSwitchCam');
+const btnToggleFlash = document.getElementById('btnToggleFlash');
 const namaCamLabel = document.getElementById('namaCamLabel');
 
 let camPeer = null;
 let currentFacingMode = "environment";
 let localStream = null;
 let activeMediaCall = null;
+let flashOn = false;
+let flashSupported = false;
 
 btnStart.addEventListener('click', () => {
     let camName = inputCamNameKamera.value.trim().toLowerCase().replace(/\s+/g, '-');
@@ -386,9 +395,44 @@ function mulaiKamera() {
                 const sender = activeMediaCall.peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
                 if (sender) sender.replaceTrack(videoTrack);
             }
+            checkFlashSupport();
         })
         .catch((err) => { statusInfo.innerText = "Gagal Akses"; statusInfo.style.color = "#ef4444"; });
 }
+
+function checkFlashSupport() {
+    flashSupported = false;
+    flashOn = false;
+
+    const videoTrack = localStream ? localStream.getVideoTracks()[0] : null;
+    if (videoTrack && typeof videoTrack.getCapabilities === 'function') {
+        const caps = videoTrack.getCapabilities();
+        flashSupported = !!caps.torch;
+    }
+    updateFlashButton();
+}
+
+function updateFlashButton() {
+    if (!flashSupported) {
+        btnToggleFlash.style.display = 'none';
+        return;
+    }
+    btnToggleFlash.style.display = 'flex';
+    btnToggleFlash.classList.toggle('flash-active', flashOn);
+}
+
+btnToggleFlash.addEventListener('click', () => {
+    const videoTrack = localStream ? localStream.getVideoTracks()[0] : null;
+    if (!videoTrack) return;
+
+    const newState = !flashOn;
+    videoTrack.applyConstraints({ advanced: [{ torch: newState }] })
+        .then(() => {
+            flashOn = newState;
+            updateFlashButton();
+        })
+        .catch(() => { alert("Flash tidak didukung pada kamera ini."); });
+});
 
 btnSwitchCam.addEventListener('click', () => {
     currentFacingMode = (currentFacingMode === "environment") ? "user" : "environment";
