@@ -189,10 +189,12 @@ button{ display:inline-flex; align-items:center; justify-content:center; gap:6px
 .video-wrapper.rotated-box{ aspect-ratio:9/16; max-height:460px; }
 .video-wrapper:fullscreen, .video-wrapper:-webkit-full-screen{ aspect-ratio:auto !important; max-height:none !important; width:100vw; height:100vh; background:#000; }
 
-.cam-title{ position:absolute; top:12px; left:12px; background:rgba(11,9,6,.85); padding:5px 10px; border-radius:var(--radius); font-family:'JetBrains Mono', monospace; font-size:11.5px; font-weight:700; letter-spacing:.04em; color:var(--text); z-index:10; border-left:3px solid var(--amber); backdrop-filter:blur(4px); }
-.cam-title.live{ border-left-color:var(--green); }
+.cam-title{ position:absolute; top:12px; left:12px; background:rgba(11,9,6,.85); padding:5px 10px; border-radius:var(--radius); font-family:'JetBrains Mono', monospace; font-size:11.5px; font-weight:700; letter-spacing:.04em; color:var(--text); z-index:10; border-left:3px solid var(--amber); backdrop-filter:blur(4px); display:flex; align-items:center; gap:7px; }
 .cam-title.error{ border-left-color:var(--red); }
 .cam-title.disconnected{ border-left-color:var(--text-faint); color:var(--text-faint); opacity:.75; }
+.live-dot-title{ width:8px; height:8px; border-radius:50%; background:var(--red); box-shadow:0 0 6px 1px rgba(255,77,77,.5); flex-shrink:0; display:none; }
+.live-dot-title.show{ display:inline-block; animation:blink 1.4s infinite; }
+@media (prefers-reduced-motion: reduce){ .live-dot-title.show{ animation:none; } }
 
 .top-right-cluster{ position:absolute; top:12px; right:12px; z-index:10; display:flex; flex-direction:column; gap:6px; align-items:flex-end; }
 .timestamp{ background:rgba(11,9,6,.85); padding:5px 10px; border-radius:var(--radius); font-family:'JetBrains Mono', monospace; font-size:11.5px; color:var(--text-dim); backdrop-filter:blur(4px); border:1px solid var(--border); letter-spacing:.05em; }
@@ -657,16 +659,12 @@ function initMonitorMode() {
 
         call.on('stream', (remoteStream) => {
             const videoElement = document.getElementById(`video-${call.peer}`);
-            const titleBadge = document.getElementById(`title-${call.peer}`);
-            const liveBadge = document.getElementById(`live-${call.peer}`);
 
             streams[call.peer] = remoteStream;
 
             if (videoElement) {
                 videoElement.srcObject = remoteStream;
                 updateMuteIcon(call.peer);
-                if (titleBadge) titleBadge.className = "cam-title live";
-                if (liveBadge) liveBadge.classList.add("show");
                 updateConnStatus(call.peer, 'live');
 
                 videoElement.addEventListener('loadedmetadata', () => {
@@ -675,8 +673,7 @@ function initMonitorMode() {
                 });
 
                 videoElement.addEventListener('ended', () => {
-                    if (liveBadge) liveBadge.classList.remove("show");
-                    if (titleBadge) titleBadge.className = "cam-title error";
+                    updateConnStatus(call.peer, 'error');
                 });
 
                 setTimeout(() => updateTransform(call.peer), 500);
@@ -684,14 +681,10 @@ function initMonitorMode() {
         });
 
         call.on('close', () => {
-            const titleBadge = document.getElementById(`title-${call.peer}`);
-            const liveBadge = document.getElementById(`live-${call.peer}`);
-            if (liveBadge) liveBadge.classList.remove("show");
-            if (titleBadge) titleBadge.className = "cam-title error";
+            if (connStates[call.peer] !== 'disconnected') updateConnStatus(call.peer, 'error');
 
             delete mediaCalls[call.peer];
             stopStatsMonitoring(call.peer);
-            if (connStates[call.peer] !== 'disconnected') updateConnStatus(call.peer, 'error');
         });
     });
 }
@@ -746,21 +739,25 @@ function updateConnStatus(id, status) {
     connStates[id] = status;
 
     const title = document.getElementById(`title-${id}`);
-    const liveBadge = document.getElementById(`live-${id}`);
+    const titleText = document.getElementById(`titletext-${id}`);
+    const dot = document.getElementById(`dot-${id}`);
     const btn = document.getElementById(`btn-conn-${id}`);
     const label = camNames[id] || id;
 
     if (title) {
-        const extraClass = status === 'live' ? ' live' : (status === 'error' ? ' error' : (status === 'disconnected' ? ' disconnected' : ''));
+        const extraClass = status === 'error' ? ' error' : (status === 'disconnected' ? ' disconnected' : '');
         title.className = "cam-title" + extraClass;
-        title.innerText = status === 'disconnected'
+    }
+
+    if (titleText) {
+        titleText.innerText = status === 'disconnected'
             ? `CAM: ${label} · TERPUTUS`
             : status === 'error'
                 ? `CAM: ${label} · GAGAL`
                 : `CAM: ${label}`;
     }
 
-    if (liveBadge && status !== 'live') liveBadge.classList.remove('show');
+    if (dot) dot.classList.toggle('show', status === 'live');
 
     if (btn) {
         if (status === 'disconnected' || status === 'error') {
@@ -1119,7 +1116,7 @@ btnAddCam.addEventListener('click', () => {
 
     card.innerHTML = `
         <div class="video-wrapper bracket" id="wrapper-${fullCamID}">
-            <div class="cam-title" id="title-${fullCamID}">CAM: ${camName.toUpperCase()}</div>
+            <div class="cam-title" id="title-${fullCamID}"><span class="live-dot-title" id="dot-${fullCamID}"></span><span id="titletext-${fullCamID}">CAM: ${camName.toUpperCase()}</span></div>
             <div class="top-right-cluster">
                 <div class="net-quality" id="netq-${fullCamID}" title="Menunggu data jaringan...">
                     <span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span>
@@ -1128,7 +1125,6 @@ btnAddCam.addEventListener('click', () => {
                 <button class="win-icon-btn" onclick="rotateCam('${fullCamID}')" title="Rotasi Layar">${iconRotate}</button>
             </div>
             <video id="video-${fullCamID}" autoplay playsinline></video>
-            <div class="live-badge" id="live-${fullCamID}"><span class="dot-live"></span>Live</div>
             <div class="video-controls-bar">
                 <button id="btn-mute-${fullCamID}" onclick="toggleMuteCam('${fullCamID}')" title="Bisukan/aktifkan suara">${iconVolumeOn}</button>
                 <input type="range" id="range-vol-${fullCamID}" min="0" max="1" step="0.05" value="1" oninput="setVolumeCam('${fullCamID}', this.value)" title="Volume">
